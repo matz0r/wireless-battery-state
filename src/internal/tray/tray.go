@@ -1,18 +1,17 @@
 // Package tray runs the tray: one icon per device, a shared menu, polling and notifications.
+// The logic here is shared; the icons themselves come from a platform backend:
+// StatusNotifierItem over D-Bus on Linux (sni_unix.go), the notification area on Windows
+// (tray_windows.go).
 package tray
 
 import (
 	"fmt"
+	"image"
 	"os"
-	"path/filepath"
-	"sort"
-	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/matz0r/wireless-battery-state/src/internal/battery"
-	"github.com/matz0r/wireless-battery-state/src/internal/hidraw"
 	"github.com/matz0r/wireless-battery-state/src/internal/icon"
 	"github.com/matz0r/wireless-battery-state/src/internal/install"
 	"github.com/matz0r/wireless-battery-state/src/internal/notify"
@@ -27,13 +26,38 @@ type Options struct {
 
 const placeholderKey = "\x00none"
 
+// appearance is what one tray icon shows.
+type appearance struct {
+	Title    string                      // one line, e.g. "Model D-: 77%"
+	Render   func(size int) *image.NRGBA // the icon at any size
+	TipTitle string
+	TipText  string
+	TipIcon  bool // show the icon in the tooltip too (devices, not the placeholder)
+}
+
+// platform is a tray backend.
+type platform interface {
+	// newItem shows a new icon; key is the stable device key.
+	newItem(key string, look appearance, m *menuState) (trayItem, error)
+	// watchHotplug calls changed when devices may have come or gone, until quit is closed.
+	watchHotplug(changed func(), quit <-chan struct{})
+	// stop releases what the backend holds, after all items are closed.
+	stop()
+}
+
+type trayItem interface {
+	update(look appearance)
+	close()
+}
+
 type app struct {
-	opts    Options
-	menu    *menuState
-	monitor *battery.Monitor
+	opts     Options
+	platform platform
+	menu     *menuState
+	monitor  *battery.Monitor
 
 	mu       sync.Mutex
-	items    map[string]*item
+	items    map[string]trayItem
 	devices  []battery.Status
 	warned   map[string]bool // low-battery notification already shown
 	setupMsg string
@@ -55,18 +79,25 @@ func Run(opts Options) error {
 		opts:    opts,
 		menu:    &menuState{},
 		monitor: battery.NewMonitor(),
-		items:   map[string]*item{},
+		items:   map[string]trayItem{},
 		warned:  map[string]bool{},
 		refresh: make(chan struct{}, 1),
 		quit:    make(chan struct{}),
 	}
+	p, err := newPlatform(a.requestQuit)
+	if err != nil {
+		return err
+	}
+	defer p.stop()
+	a.platform = p
 	a.rebuildMenu()
 
 	// The first poll runs before the loop so a missing tray is reported as an error.
 	if err := a.poll(); err != nil {
+		a.closeAll()
 		return err
 	}
-	go a.watchHotplug()
+	go p.watchHotplug(a.triggerRefresh, a.quit)
 
 	timer := time.NewTimer(opts.Interval)
 	for {
@@ -90,6 +121,8 @@ func Run(opts Options) error {
 	}
 }
 
+func (a *app) requestQuit() { a.quitOnce.Do(func() { close(a.quit) }) }
+
 func (a *app) triggerRefresh() {
 	select {
 	case a.refresh <- struct{}{}:
@@ -103,8 +136,9 @@ func (a *app) poll() error {
 		return err
 	}
 	devs := a.monitor.Update(battery.Poll(env))
-	a.notifyLow(devs)
-	return a.apply(devs)
+	err = a.apply(devs)
+	a.notifyLow(devs) // after apply: on Windows a notification needs an icon to come from
+	return err
 }
 
 // apply makes the tray icons match the devices: adds, updates and removes icons.
@@ -134,12 +168,12 @@ func (a *app) apply(devs []battery.Status) error {
 	}
 	var firstErr error
 	for _, key := range order {
-		title, icons, tip := a.look(key, want[key])
+		look := a.look(key, want[key])
 		if it, ok := a.items[key]; ok {
-			it.update(title, icons, tip)
+			it.update(look)
 			continue
 		}
-		it, err := newItem(itemID(key), title, icons, tip, a.menu)
+		it, err := a.platform.newItem(key, look, a.menu)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
@@ -151,31 +185,22 @@ func (a *app) apply(devs []battery.Status) error {
 	return firstErr
 }
 
-func (a *app) look(key string, d battery.Status) (string, []pixmap, tooltip) {
+func (a *app) look(key string, d battery.Status) appearance {
 	if key == placeholderKey {
-		icons := pixmaps(func(size int) []byte { return icon.ARGB32(icon.AppIcon(size)) })
-		return "Battery State", icons, tooltip{Title: "Battery State", Text: "No supported devices found"}
+		return appearance{Title: "Battery State", Render: icon.AppIcon, TipTitle: "Battery State", TipText: "No supported devices found"}
 	}
 	st := icon.State{Percent: d.Percent, Charging: d.Charging, Asleep: d.Asleep, NoAccess: d.NoAccess, Low: battery.Low}
-	icons := pixmaps(func(size int) []byte { return icon.ARGB32(icon.Render(st, size)) })
 	text := d.Detail()
 	if d.Via != "" {
 		text += "\n" + d.Via
 	}
-	return d.Name + ": " + d.Detail(), icons, tooltip{Title: d.Name, Text: text, Pixmaps: icons}
-}
-
-func pixmaps(render func(size int) []byte) []pixmap {
-	var out []pixmap
-	for _, s := range icon.Sizes {
-		out = append(out, pixmap{W: int32(s), H: int32(s), Pix: render(s)})
+	return appearance{
+		Title:    d.Name + ": " + d.Detail(),
+		Render:   func(size int) *image.NRGBA { return icon.Render(st, size) },
+		TipTitle: d.Name,
+		TipText:  text,
+		TipIcon:  true,
 	}
-	return out
-}
-
-func itemID(key string) string {
-	r := strings.NewReplacer(":", "-", "/", "-", " ", "-", "\x00", "")
-	return "battery-state-" + r.Replace(key)
 }
 
 func (a *app) rebuildMenu() {
@@ -193,7 +218,7 @@ func (a *app) rebuildMenu() {
 	}
 	items = append(items, menuItem{Separator: true})
 	items = append(items, menuItem{Label: "Refresh now", Enabled: true, Action: a.triggerRefresh})
-	if setup.NeedsAccess(devs) {
+	if setup.Available && setup.NeedsAccess(devs) {
 		items = append(items, menuItem{Label: "Set up access…", Enabled: true, Action: a.runSetup})
 	}
 	if setupMsg != "" {
@@ -207,7 +232,7 @@ func (a *app) rebuildMenu() {
 		a.rebuildMenu()
 	}})
 	items = append(items, menuItem{Separator: true})
-	items = append(items, menuItem{Label: "Quit", Enabled: true, Action: func() { a.quitOnce.Do(func() { close(a.quit) }) }})
+	items = append(items, menuItem{Label: "Quit", Enabled: true, Action: a.requestQuit})
 	a.menu.set(items)
 }
 
@@ -245,54 +270,4 @@ func (a *app) closeAll() {
 		it.close()
 		delete(a.items, k)
 	}
-}
-
-// watchHotplug polls quickly when hidraw nodes or batteries come or go, so a plugged-in
-// receiver shows up within seconds instead of at the next interval.
-func (a *app) watchHotplug() {
-	last := hotplugSignature()
-	t := time.NewTicker(3 * time.Second)
-	defer t.Stop()
-	for {
-		select {
-		case <-a.quit:
-			return
-		case <-t.C:
-			if sig := hotplugSignature(); sig != last {
-				last = sig
-				time.Sleep(1500 * time.Millisecond) // let the device finish setting up
-				a.triggerRefresh()
-			}
-		}
-	}
-}
-
-func hotplugSignature() string {
-	var names []string
-	for _, dir := range []string{hidraw.SysRoot, battery.PowerSupplyRoot} {
-		entries, _ := os.ReadDir(dir)
-		for _, e := range entries {
-			names = append(names, e.Name())
-		}
-	}
-	sort.Strings(names)
-	return strings.Join(names, ",")
-}
-
-// singleInstance makes sure only one tray runs per user.
-func singleInstance() (func(), error) {
-	dir := os.Getenv("XDG_RUNTIME_DIR")
-	if dir == "" {
-		dir = os.TempDir()
-	}
-	path := filepath.Join(dir, fmt.Sprintf("battery-state-%d.lock", os.Getuid()))
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("already running")
-	}
-	return func() { f.Close() }, nil
 }

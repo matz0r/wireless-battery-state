@@ -1,10 +1,10 @@
-// Package hidraw enumerates and talks to Linux hidraw devices (/dev/hidraw*).
+//go:build !windows
+
 package hidraw
 
 import (
 	"bufio"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,29 +21,6 @@ var SysRoot = "/sys/class/hidraw"
 
 // DevRoot is where the device files live.
 var DevRoot = "/dev"
-
-// Info describes one hidraw node, read from sysfs without opening the device.
-type Info struct {
-	Node       string // "hidraw3"
-	Path       string // "/dev/hidraw3"
-	Bus        uint16 // 0x0003 = USB, 0x0005 = Bluetooth
-	VendorID   uint16
-	ProductID  uint16
-	Name       string // HID_NAME, e.g. "Glorious Model D- Wireless"
-	Phys       string // HID_PHYS, e.g. "usb-0000:0b:00.3-1/input2"
-	Interface  int    // USB interface number from Phys, -1 if unknown
-	Driver     string // kernel driver bound to the HID device (hid-generic, logitech-hidpp-device, ...)
-	Descriptor Descriptor
-}
-
-func (i Info) String() string {
-	var tl []string
-	for _, u := range i.Descriptor.TopLevel {
-		tl = append(tl, fmt.Sprintf("%04X:%04X", u.Page, u.ID))
-	}
-	return fmt.Sprintf("%s %04X:%04X if=%d %q driver=%s collections=[%s] feature=%v",
-		i.Path, i.VendorID, i.ProductID, i.Interface, i.Name, i.Driver, strings.Join(tl, " "), i.Descriptor.HasFeature)
-}
 
 // Enumerate lists all hidraw nodes, sorted by node number.
 func Enumerate() ([]Info, error) {
