@@ -62,3 +62,22 @@ func TestParseDescriptorTruncated(t *testing.T) {
 	ParseDescriptor([]byte{0xFE})
 	ParseDescriptor(nil)
 }
+
+func TestWindowsPaths(t *testing.T) {
+	const guid = "#{4d1e55b2-f16f-11cf-88cb-001111000030}"
+	short := `\\?\HID#VID_046D&PID_C547&MI_02&Col01#8&2a2b3c4d&0&0000` + guid
+	long := `\\?\HID#VID_046D&PID_C547&MI_02&Col02#8&2a2b3c4d&0&0001` + guid
+	other := `\\?\HID#VID_046D&PID_C547&MI_02&Col01#8&99999999&0&0000` + guid
+	if PhysicalKey(short) != PhysicalKey(long) {
+		t.Errorf("collections of one interface must share a key: %q vs %q", PhysicalKey(short), PhysicalKey(long))
+	}
+	if PhysicalKey(short) == PhysicalKey(other) {
+		t.Error("two receivers must get different keys")
+	}
+	if got := PhysicalKey(short); got != "vid_046d&pid_c547&mi_02#8&2a2b3c4d&0" {
+		t.Errorf("PhysicalKey = %q", got)
+	}
+	if got := shortNode(short); got != "vid_046d&pid_c547&mi_02&col01#8&2a2b3c4d&0&0000" {
+		t.Errorf("shortNode = %q", got)
+	}
+}
