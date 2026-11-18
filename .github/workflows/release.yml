@@ -1,0 +1,42 @@
+# Builds battery-state for Linux when a version tag (e.g. v0.1.0) is pushed and publishes
+# it as a GitHub release. The binary is static (CGO_ENABLED=0), so it runs on any distro.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # to create the release
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+        run: go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o battery-state ./src
+
+      - name: Package
+        run: |
+          name="battery-state-${GITHUB_REF_NAME}-x86_64-linux"
+          mkdir -p "$name"
+          cp battery-state README.md LICENSE "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          echo "ARCHIVE=$name.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" "$ARCHIVE"
+          --title "battery-state $GITHUB_REF_NAME" --generate-notes
