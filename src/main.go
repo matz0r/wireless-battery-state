@@ -19,7 +19,7 @@ import (
 	"github.com/matz0r/wireless-battery-state/src/internal/update"
 )
 
-var version = "0.3.0"
+var version = "0.4.0"
 
 func main() {
 	if len(os.Args) > 1 {
