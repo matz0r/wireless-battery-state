@@ -3,13 +3,9 @@
 # Battery State
 
 Battery levels of your wireless mouse, keyboard and headset in the system tray, on Linux and
-Windows. A single static binary written in Go, with no vendor software, daemon or runtime needed.
+Windows. A single static binary written in Go, with no vendor software, daemon or runtime needed. Inspired by [Wireless Battery](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor).
 
-Inspired by and protocol-compatible with
-[Wireless Battery](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor) (Windows, C++).
-
-> **Windows support is new and has not been tested on real hardware yet.** It builds and its
-> unit tests run on Windows in CI, but please report what works and what doesn't.
+<p align="center"><img src="assets/taskbar.png" alt="Battery State" height="75px"></p>
 
 ## Display
 
