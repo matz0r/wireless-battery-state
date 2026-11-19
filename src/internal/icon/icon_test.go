@@ -60,6 +60,35 @@ func TestGlyphsHaveInk(t *testing.T) {
 	}
 }
 
+// Charging adds the bolt (yellow pixels) and keeps the level color on the bar.
+func TestChargingBolt(t *testing.T) {
+	yellow := func(s State) int {
+		n := 0
+		img := Render(s, 48)
+		for i := 0; i < len(img.Pix); i += 4 {
+			if img.Pix[i] > 0xE0 && img.Pix[i+1] > 0xC0 && img.Pix[i+2] < 0x80 && img.Pix[i+3] > 0xC0 {
+				n++
+			}
+		}
+		return n
+	}
+	for _, g := range []Glyph{NoGlyph, MouseGlyph, KeyboardGlyph, HeadsetGlyph} {
+		on := State{Percent: 94, Charging: true, Low: 15, Glyph: g}
+		off := on
+		off.Charging = false
+		if yellow(on) < 10 || yellow(off) != 0 {
+			t.Errorf("glyph %d: bolt pixels charging %d, not charging %d", g, yellow(on), yellow(off))
+		}
+		bar := func(s State) [3]uint8 {
+			c := Render(s, 48).NRGBAAt(24, 47)
+			return [3]uint8{c.R, c.G, c.B}
+		}
+		if bar(on) != bar(off) {
+			t.Errorf("glyph %d: charging changes the bar color", g)
+		}
+	}
+}
+
 func TestAppIcon(t *testing.T) {
 	img := AppIcon(48)
 	if img.Bounds().Dx() != 48 || img.NRGBAAt(24, 24).A == 0 {

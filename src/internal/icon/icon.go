@@ -1,4 +1,5 @@
-// Package icon draws the tray icons: a device pictogram, the battery percentage and a level bar.
+// Package icon draws the tray icons: a device pictogram (with a lightning bolt while
+// charging), the battery percentage and a level bar.
 package icon
 
 import (
@@ -23,7 +24,7 @@ import (
 // State is what an icon shows.
 type State struct {
 	Percent  int  // 0..100, -1 unknown
-	Charging bool // blue bar
+	Charging bool // lightning bolt next to the pictogram
 	Asleep   bool // dimmed (last known value)
 	NoAccess bool // "?"
 	Low      int  // red at or below this level
@@ -34,14 +35,14 @@ type State struct {
 var Sizes = []int{16, 22, 24, 32, 48, 64}
 
 var (
-	textColor   = color.NRGBA{0xF4, 0xF4, 0xF4, 0xFF}
-	lowColor    = color.NRGBA{0xFF, 0x4D, 0x4D, 0xFF}
-	outline     = color.NRGBA{0x00, 0x00, 0x00, 0xC0}
-	barBack     = color.NRGBA{0x00, 0x00, 0x00, 0x90}
-	barGood     = color.NRGBA{0x4C, 0xC3, 0x5A, 0xFF}
-	barMid      = color.NRGBA{0xF0, 0xB4, 0x29, 0xFF}
-	barLow      = color.NRGBA{0xFF, 0x4D, 0x4D, 0xFF}
-	barCharging = color.NRGBA{0x3D, 0xA5, 0xFF, 0xFF}
+	textColor = color.NRGBA{0xF4, 0xF4, 0xF4, 0xFF}
+	lowColor  = color.NRGBA{0xFF, 0x4D, 0x4D, 0xFF}
+	outline   = color.NRGBA{0x00, 0x00, 0x00, 0xC0}
+	barBack   = color.NRGBA{0x00, 0x00, 0x00, 0x90}
+	barGood   = color.NRGBA{0x4C, 0xC3, 0x5A, 0xFF}
+	barMid    = color.NRGBA{0xF0, 0xB4, 0x29, 0xFF}
+	barLow    = color.NRGBA{0xFF, 0x4D, 0x4D, 0xFF}
+	boltColor = color.NRGBA{0xFF, 0xD8, 0x3D, 0xFF}
 )
 
 var (
@@ -101,8 +102,6 @@ func Render(s State, size int) *image.NRGBA {
 		draw.Draw(img, image.Rect(0, barTop, size, size), image.NewUniform(barBack), image.Point{}, draw.Src)
 		fill := barGood
 		switch {
-		case s.Charging:
-			fill = barCharging
 		case s.Percent <= s.Low:
 			fill = barLow
 		case s.Percent <= 50:
@@ -119,13 +118,28 @@ func Render(s State, size int) *image.NRGBA {
 		draw.Draw(img, image.Rect(1, barTop+inset, 1+w, size-inset), image.NewUniform(fill), image.Point{}, draw.Src)
 	}
 
+	// Top row: the pictogram, and a lightning bolt beside it while charging, centered together.
 	gh := int(math.Round(float64(size) * 0.36))
-	if s.Glyph != NoGlyph {
+	charging := s.Charging && !s.NoAccess
+	if s.Glyph != NoGlyph || charging {
 		h := gh - pad
-		w := min(int(math.Round(float64(h)*s.Glyph.aspect())), size-2*pad)
-		mask := glyphMask(s.Glyph, w, h)
-		at := image.Pt((size-w)/2, pad+(h-mask.Bounds().Dy())/2)
-		drawMask(img, mask, at, textColor, pad)
+		boltW, gap, glyphW := 0, 0, 0
+		if charging {
+			boltW = max(int(math.Round(float64(h)*boltAspect)), 3)
+		}
+		if s.Glyph != NoGlyph {
+			if charging {
+				gap = max(size/24, 1)
+			}
+			glyphW = min(int(math.Round(float64(h)*s.Glyph.aspect())), size-2*pad-boltW-gap)
+		}
+		x := (size - glyphW - gap - boltW) / 2
+		if glyphW > 0 {
+			drawMask(img, glyphMask(s.Glyph, glyphW, h), image.Pt(x, pad), textColor, pad)
+		}
+		if charging {
+			drawMask(img, boltMask(boltW, h), image.Pt(x+glyphW+gap, pad), boltColor, pad)
+		}
 	}
 	textTop := gh + max(size/16, 1)
 

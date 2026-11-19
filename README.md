@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/icon-256.png" alt="Battery State" height="128px"></p>
+<p align="center"><img src="assets/icon-256.png" alt="Battery State" height="64px"></p>
 
 # Battery State
 
@@ -11,7 +11,8 @@ Battery levels of your wireless mouse, keyboard and headset in the system tray. 
 - **One tray icon per device**: a small pictogram (mouse, keyboard or headset) on top, the
   percentage below it and a level bar along the bottom.
 - **Low battery**: the number turns red at 15% or less, and a desktop notification appears once.
-- **Charging**: the bar turns blue.
+- **Charging**: a yellow lightning bolt appears next to the pictogram; the bar keeps its level
+  color.
 - **Asleep or off**: the icon is dimmed and shows the last known value (`–` if there is none yet).
 - **No access**: `?` means the device was found but can't be read yet; see [Access](#access).
 - Hover for the name and details. **Click** an icon for the settings window and **right-click**

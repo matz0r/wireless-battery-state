@@ -124,3 +124,23 @@ func glyphMask(g Glyph, w, h int) *image.Alpha {
 	}
 	return s.mask()
 }
+
+// boltAspect is the lightning bolt's width divided by its height.
+const boltAspect = 0.62
+
+// boltMask draws the charging lightning bolt into a w×h coverage mask.
+func boltMask(w, h int) *image.Alpha {
+	s := newShape(w, h)
+	W, H := float64(w), float64(h)
+	pts := [][2]float64{{0.66, 0}, {0.04, 0.58}, {0.44, 0.58}, {0.30, 1}, {0.96, 0.38}, {0.56, 0.38}}
+	for i, p := range pts {
+		x, y := float32(p[0]*W), float32(p[1]*H)
+		if i == 0 {
+			s.fill.MoveTo(x, y)
+		} else {
+			s.fill.LineTo(x, y)
+		}
+	}
+	s.fill.ClosePath()
+	return s.mask()
+}
