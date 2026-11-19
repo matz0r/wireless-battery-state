@@ -1,5 +1,6 @@
-# Builds battery-state for Linux when a version tag (e.g. v0.1.0) is pushed and publishes
-# it as a GitHub release. The binary is static (CGO_ENABLED=0), so it runs on any distro.
+# Builds battery-state for Linux and Windows when a version tag (e.g. v0.1.0) is pushed and
+# publishes both as a GitHub release. The binaries are static (CGO_ENABLED=0): the Linux one
+# runs on any distro, the Windows one needs no runtime or installer.
 name: Release
 
 on:
@@ -10,7 +11,21 @@ permissions:
   contents: write # to create the release
 
 jobs:
-  linux:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./...
+
+  release:
+    needs: test
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -18,25 +33,32 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Test
-        run: go test ./...
-
       - name: Build
-        run: make release VERSION="${GITHUB_REF_NAME#v}"
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          make release VERSION="$v"
+          # -H windowsgui: no console window when the tray starts.
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=$v" -o target/release/battery-state.exe ./src
 
-      # The in-app updater (src/internal/update) downloads exactly this archive name.
+      # The in-app updater (src/internal/update) downloads exactly the Linux archive name.
       - name: Package
         run: |
-          name="battery-state-${GITHUB_REF_NAME}-x86_64-linux"
-          mkdir -p "$name"
-          cp target/release/battery-state README.md LICENSE "$name/"
-          cp assets/icon.svg "$name/battery-state.svg"
-          tar -czf "$name.tar.gz" "$name"
-          echo "ARCHIVE=$name.tar.gz" >> "$GITHUB_ENV"
+          linux="battery-state-${GITHUB_REF_NAME}-x86_64-linux"
+          mkdir -p "$linux"
+          cp target/release/battery-state README.md LICENSE "$linux/"
+          cp assets/icon.svg "$linux/battery-state.svg"
+          tar -czf "$linux.tar.gz" "$linux"
+          win="battery-state-${GITHUB_REF_NAME}-x86_64-windows"
+          mkdir -p "$win"
+          cp target/release/battery-state.exe README.md LICENSE "$win/"
+          zip -r "$win.zip" "$win"
+          echo "ARCHIVES=$linux.tar.gz $win.zip" >> "$GITHUB_ENV"
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release create "$GITHUB_REF_NAME" "$ARCHIVE"
+          gh release create "$GITHUB_REF_NAME" $ARCHIVES
           --title "battery-state $GITHUB_REF_NAME" --generate-notes

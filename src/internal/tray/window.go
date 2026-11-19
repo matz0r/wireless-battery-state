@@ -1,11 +1,13 @@
+//go:build !windows
+
 package tray
 
 import (
-	"errors"
 	"fmt"
 	"image"
 	"os"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -23,9 +25,6 @@ import (
 
 // The settings window opens on a click on any tray icon: which devices get an icon, start
 // on login, update checks (installed copy only) and installing.
-
-// ErrRunning is returned by Run when another tray already runs for this user.
-var ErrRunning = errors.New("already running")
 
 const (
 	busName = "io.github.matz0r.BatteryState"
@@ -61,6 +60,17 @@ func (a *app) exportService() {
 	_, _ = conn.RequestName(busName, dbus.NameFlagDoNotQueue)
 }
 
+const hasSettingsWindow = true
+
+// windowState is the app's settings-window state.
+type windowState struct {
+	win      *ui.Window
+	opening  bool
+	inst     install.State
+	busy     busy
+	checking atomic.Bool
+}
+
 // busy is the state of a running install or update, shown in the window.
 type busy struct {
 	text  string // "Installing…", "" when idle
@@ -81,7 +91,7 @@ func logo(px int) image.Image {
 
 func (a *app) toggleWindow() {
 	a.mu.Lock()
-	w := a.win
+	w := a.ws.win
 	a.mu.Unlock()
 	if w != nil {
 		w.Close()
@@ -92,7 +102,7 @@ func (a *app) toggleWindow() {
 
 func (a *app) showWindow() {
 	a.mu.Lock()
-	w := a.win
+	w := a.ws.win
 	a.mu.Unlock()
 	if w != nil {
 		w.Raise()
@@ -103,16 +113,16 @@ func (a *app) showWindow() {
 
 func (a *app) openWindow() {
 	a.mu.Lock()
-	if a.win != nil || a.opening {
+	if a.ws.win != nil || a.ws.opening {
 		a.mu.Unlock()
 		return
 	}
-	a.opening = true
+	a.ws.opening = true
 	a.mu.Unlock()
 
 	inst := install.Current()
 	a.mu.Lock()
-	a.inst = inst
+	a.ws.inst = inst
 	a.mu.Unlock()
 	w, err := ui.Open(ui.Options{
 		Title: "Battery State",
@@ -123,8 +133,8 @@ func (a *app) openWindow() {
 		Build: a.buildWindow,
 	})
 	a.mu.Lock()
-	a.opening = false
-	a.win = w
+	a.ws.opening = false
+	a.ws.win = w
 	a.mu.Unlock()
 	if err != nil {
 		notify.Send("Battery State", "Can't open the settings window: "+err.Error())
@@ -133,8 +143,8 @@ func (a *app) openWindow() {
 	go func() {
 		<-w.Done()
 		a.mu.Lock()
-		if a.win == w {
-			a.win = nil
+		if a.ws.win == w {
+			a.ws.win = nil
 		}
 		a.mu.Unlock()
 	}()
@@ -142,7 +152,7 @@ func (a *app) openWindow() {
 
 func (a *app) refreshWindow() {
 	a.mu.Lock()
-	w := a.win
+	w := a.ws.win
 	a.mu.Unlock()
 	if w != nil {
 		w.Refresh()
@@ -151,7 +161,7 @@ func (a *app) refreshWindow() {
 
 func (a *app) closeWindow() {
 	a.mu.Lock()
-	w := a.win
+	w := a.ws.win
 	a.mu.Unlock()
 	if w == nil {
 		return
@@ -163,17 +173,13 @@ func (a *app) closeWindow() {
 	}
 }
 
-func iconState(d battery.Status) icon.State {
-	return icon.State{Percent: d.Percent, Charging: d.Charging, Asleep: d.Asleep, NoAccess: d.NoAccess, Low: battery.Low, Glyph: glyphFor(d.Kind)}
-}
-
 // buildWindow lays out the settings window. It runs on the window's goroutine.
 func (a *app) buildWindow(b *ui.Builder) {
 	a.mu.Lock()
 	devs := append([]battery.Status(nil), a.devices...)
 	st := a.settings
 	st.Hidden = append([]string(nil), st.Hidden...)
-	inst, bz, setupMsg := a.inst, a.busy, a.setupMsg
+	inst, bz, setupMsg := a.ws.inst, a.ws.busy, a.setupMsg
 	a.mu.Unlock()
 	version := a.opts.Version
 
@@ -202,7 +208,7 @@ func (a *app) buildWindow(b *ui.Builder) {
 			b.CheckRow(func(px int) image.Image { return icon.Render(iconState(d), px) },
 				d.Name, detail, shown, func() { a.setHidden(d.Key, shown) })
 		}
-		if setup.NeedsAccess(devs) {
+		if setup.Available && setup.NeedsAccess(devs) {
 			b.InfoRow("Some devices can't be read", "Installs a udev rule; asks for your password",
 				&ui.Button{Label: "Set up access", OnClick: func() { go a.runSetup() }})
 		}
@@ -240,7 +246,7 @@ func (a *app) buildWindow(b *ui.Builder) {
 
 	b.Buttons(
 		[]ui.Button{{Label: "Refresh", OnClick: a.triggerRefresh}},
-		[]ui.Button{{Label: "Quit Battery State", OnClick: a.quitApp}},
+		[]ui.Button{{Label: "Quit Battery State", OnClick: a.requestQuit}},
 	)
 }
 
@@ -265,7 +271,7 @@ func installRow(inst install.State, version string) (title, detail, label string
 
 func (a *app) setBusy(bz busy) {
 	a.mu.Lock()
-	a.busy = bz
+	a.ws.busy = bz
 	a.mu.Unlock()
 	a.refreshWindow()
 }
@@ -292,8 +298,6 @@ func (a *app) setHidden(key string, hidden bool) {
 		}
 	}()
 }
-
-func (a *app) quitApp() { a.quitOnce.Do(func() { close(a.quit) }) }
 
 // restart replaces this process with the installed copy, which takes over the tray and
 // opens its settings window.
@@ -361,10 +365,10 @@ func (a *app) maybeCheckUpdate() {
 }
 
 func (a *app) checkUpdate() {
-	if !a.checking.CompareAndSwap(false, true) {
+	if !a.ws.checking.CompareAndSwap(false, true) {
 		return
 	}
-	defer a.checking.Store(false)
+	defer a.ws.checking.Store(false)
 	update.RemoveLeftovers()
 	v, err := update.Latest(a.agent())
 	if err != nil {
@@ -387,7 +391,7 @@ func (a *app) checkUpdate() {
 
 func (a *app) runUpdate(v string) {
 	a.mu.Lock()
-	if a.busy.text != "" {
+	if a.ws.busy.text != "" {
 		a.mu.Unlock()
 		return
 	}

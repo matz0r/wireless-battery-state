@@ -1,4 +1,7 @@
-// Package notify shows desktop notifications (org.freedesktop.Notifications).
+//go:build !windows
+
+// Package notify shows desktop notifications: org.freedesktop.Notifications on Linux, a
+// notification-area balloon (a toast on Windows 10 and 11) on Windows.
 package notify
 
 import (

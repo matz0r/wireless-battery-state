@@ -82,7 +82,7 @@ const Low = 15
 // IsLow reports whether the device should warn: low, known and not charging.
 func (s Status) IsLow() bool { return !s.Charging && !s.NoAccess && s.Percent >= 0 && s.Percent <= Low }
 
-// HID is what the drivers need from an open hidraw node. *hidraw.Device implements it;
+// HID is what the drivers need from an open HID node. *hidraw.Device implements it;
 // tests use fakes.
 type HID interface {
 	Write(report []byte) (int, error)
@@ -122,8 +122,9 @@ type UdevID struct {
 	Products []uint16
 }
 
-// Drivers are all supported device families, in polling order.
-var Drivers = []Driver{gloriousDriver, astroDriver, powerSupplyDriver}
+// Drivers are all supported device families, in polling order. platformDrivers adds what
+// differs per OS: the kernel's power_supply batteries on Linux, Logitech HID++ on Windows.
+var Drivers = append([]Driver{gloriousDriver, astroDriver}, platformDrivers...)
 
 // DefaultEnv reads the real hidraw nodes.
 func DefaultEnv() (*Env, error) {

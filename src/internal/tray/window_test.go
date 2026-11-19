@@ -1,3 +1,5 @@
+//go:build !windows
+
 package tray
 
 import (
@@ -34,7 +36,7 @@ func TestWindowLayout(t *testing.T) {
 	}
 	for name, inst := range cases {
 		a := testApp()
-		a.inst = inst
+		a.ws.inst = inst
 		for theme, th := range map[string]ui.Theme{"dark": ui.Dark, "light": ui.Light} {
 			img := ui.Snapshot(ui.Options{Width: 440, Theme: th, Build: a.buildWindow}, 2, image.Pt(300, 260))
 			if img.Bounds().Dy() < 400 {

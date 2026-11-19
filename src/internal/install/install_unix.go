@@ -1,5 +1,7 @@
-// Package install installs battery-state for the current user and manages autostart.
-// Nothing here needs root: everything goes under ~/.local and ~/.config.
+//go:build !windows
+
+// Linux: everything goes under ~/.local and ~/.config.
+
 package install
 
 import (
