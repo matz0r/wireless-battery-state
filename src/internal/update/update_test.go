@@ -2,6 +2,7 @@ package update
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"os"
@@ -61,9 +62,33 @@ func TestDue(t *testing.T) {
 }
 
 func TestAssetURL(t *testing.T) {
-	want := "/releases/download/v1.2.3/battery-state-v1.2.3-x86_64-linux.tar.gz"
-	if got := AssetURL("1.2.3"); !strings.HasSuffix(got, want) {
-		t.Errorf("AssetURL = %s", got)
+	for goos, want := range map[string]string{
+		"linux":   "/releases/download/v1.2.3/battery-state-v1.2.3-x86_64-linux.tar.gz",
+		"windows": "/releases/download/v1.2.3/battery-state-v1.2.3-x86_64-windows.zip",
+	} {
+		if got := assetURL("1.2.3", goos); !strings.HasSuffix(got, want) {
+			t.Errorf("assetURL(%s) = %s", goos, got)
+		}
+	}
+}
+
+func TestUnpackZip(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, body := range map[string]string{
+		"battery-state-v1.2.3-x86_64-windows/README.md":   "readme",
+		"battery-state-v1.2.3-x86_64-windows/" + binary(): "binary",
+	} {
+		w, _ := zw.Create(name)
+		w.Write([]byte(body))
+	}
+	zw.Close()
+	exe := filepath.Join(t.TempDir(), binary())
+	if err := unpackZip(buf.Bytes(), exe); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(exe); string(data) != "binary" {
+		t.Errorf("unpacked %q", data)
 	}
 }
 
@@ -76,11 +101,11 @@ func TestUnpack(t *testing.T) {
 		tw.Write([]byte(body))
 	}
 	add("battery-state-v1.2.3-x86_64-linux/README.md", "readme")
-	add("battery-state-v1.2.3-x86_64-linux/battery-state", "binary")
+	add("battery-state-v1.2.3-x86_64-linux/"+binary(), "binary")
 	tw.Close()
 	gz.Close()
 
-	exe := filepath.Join(t.TempDir(), "battery-state")
+	exe := filepath.Join(t.TempDir(), binary())
 	if err := unpack(&buf, exe); err != nil {
 		t.Fatal(err)
 	}

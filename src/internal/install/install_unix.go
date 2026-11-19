@@ -6,7 +6,6 @@ package install
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"image/png"
 	"io"
@@ -14,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/matz0r/wireless-battery-state/assets"
 	"github.com/matz0r/wireless-battery-state/src/internal/icon"
@@ -213,52 +211,4 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	return os.Rename(tmp, dst)
 }
 
-// State describes the installed copy relative to the running binary.
-type State struct {
-	Installed bool   // ~/.local/bin/battery-state exists
-	Running   bool   // the running binary is the installed copy
-	Same      bool   // the installed copy has the same contents as the running binary
-	Version   string // the installed copy's --version, "" if unknown
-}
-
-// Running reports whether the running binary is the installed copy.
-func Running() bool {
-	self, err := os.Executable()
-	if err != nil {
-		return false
-	}
-	self, _ = filepath.EvalSymlinks(self)
-	dst, err := filepath.EvalSymlinks(BinPath())
-	return err == nil && self == dst
-}
-
-// Current looks at the installed copy. It runs it with --version, so call it once in a
-// while (when the settings window opens), not on every redraw.
-func Current() State {
-	var s State
-	if _, err := os.Stat(BinPath()); err != nil {
-		return s
-	}
-	s.Installed = true
-	s.Running = Running()
-	if s.Running {
-		s.Same = true
-	} else if self, err := os.Executable(); err == nil {
-		s.Same = sameFile(self, BinPath())
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if out, err := exec.CommandContext(ctx, BinPath(), "--version").Output(); err == nil {
-		s.Version = strings.TrimPrefix(strings.TrimSpace(string(out)), binName+" ")
-	}
-	return s
-}
-
-func sameFile(a, b string) bool {
-	da, err := os.ReadFile(a)
-	if err != nil {
-		return false
-	}
-	db, err := os.ReadFile(b)
-	return err == nil && bytes.Equal(da, db)
-}
+func hideWindow(*exec.Cmd) {}

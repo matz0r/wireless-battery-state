@@ -1,7 +1,9 @@
-// Package ui is a small self-drawn window for the settings. It speaks the X11 protocol in
-// pure Go (github.com/jezek/xgb), so the binary stays static; on Wayland it runs through
-// XWayland. Widgets are drawn into an image (canvas.go, builder.go) and copied to the window.
+//go:build !windows
+
 package ui
+
+// The Linux window speaks the X11 protocol in pure Go (github.com/jezek/xgb), so the binary
+// stays static; on Wayland it runs through XWayland.
 
 import (
 	"encoding/binary"
@@ -16,18 +18,6 @@ import (
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 )
-
-// Options configure a window.
-type Options struct {
-	Title string
-	Class string // WM_CLASS instance name, e.g. "battery-state"
-	Width int    // logical pixels
-	// Icon renders the window icon at a pixel size (for _NET_WM_ICON).
-	Icon  func(px int) *image.NRGBA
-	Theme Theme
-	// Build lays out the contents; it runs on the window's goroutine on every redraw.
-	Build func(b *Builder)
-}
 
 // Window is an open window. Its methods may be called from any goroutine.
 type Window struct {
@@ -308,24 +298,12 @@ func (w *Window) activate() {
 
 // render lays out the contents, draws them and copies them to the window.
 func (w *Window) render() {
-	b := &Builder{t: w.opts.Theme, s: w.scale, w: w.w, mouse: w.mouse}
-	if w.opts.Build != nil {
-		w.opts.Build(b)
-	}
-	b.end()
+	b := layout(w.opts, w.scale, w.w, w.mouse)
 	if b.y != w.h || w.frame == nil {
 		w.h = b.y
 		w.setSize(w.w, w.h)
 	}
-	img := image.NewRGBA(image.Rect(0, 0, w.w, w.h))
-	c := &canvas{img}
-	c.fill(img.Bounds(), w.opts.Theme.Bg)
-	for _, op := range b.ops {
-		if op != nil {
-			op(c)
-		}
-	}
-	w.frame = img
+	w.frame = paint(w.opts.Theme, b, w.w, w.h)
 	w.hits = b.hits
 	w.updateCursor()
 	w.present()
@@ -354,14 +332,7 @@ func (w *Window) present() {
 	}
 }
 
-func (w *Window) hitAt(p image.Point) int {
-	for i, h := range w.hits {
-		if p.In(h.r) {
-			return i
-		}
-	}
-	return -1
-}
+func (w *Window) hitAt(p image.Point) int { return hitAt(w.hits, p) }
 
 func (w *Window) updateCursor() {
 	on := w.hitAt(w.mouse) >= 0
@@ -477,24 +448,4 @@ func (w *Window) handle(ev xgb.Event) bool {
 		return true
 	}
 	return false
-}
-
-// Snapshot renders the window contents offscreen at the given scale, with the mouse at
-// mouse (for tests and screenshots).
-func Snapshot(opts Options, scale float64, mouse image.Point) *image.RGBA {
-	w := int(float64(opts.Width)*scale + 0.5)
-	b := &Builder{t: opts.Theme, s: scale, w: w, mouse: mouse}
-	if opts.Build != nil {
-		opts.Build(b)
-	}
-	b.end()
-	img := image.NewRGBA(image.Rect(0, 0, w, b.y))
-	c := &canvas{img}
-	c.fill(img.Bounds(), opts.Theme.Bg)
-	for _, op := range b.ops {
-		if op != nil {
-			op(c)
-		}
-	}
-	return img
 }

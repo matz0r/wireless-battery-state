@@ -2,8 +2,7 @@
 
 # Battery State
 
-Battery levels of your wireless mouse, keyboard and headset in the system tray, on Linux and
-Windows. A single static binary written in Go, with no vendor software, daemon or runtime needed. Inspired by [Wireless Battery](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor).
+Battery levels of your wireless mouse, keyboard and headset in the system tray. Cross-platform (Linux and Windows) in a single static binary written in Go, with no vendor software, daemon or runtime needed. Inspired by [Wireless Battery](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor).
 
 <p align="center"><img src="assets/taskbar.png" alt="Battery State" height="75px"></p>
 
@@ -15,14 +14,14 @@ Windows. A single static binary written in Go, with no vendor software, daemon o
 - **Charging**: the bar turns blue.
 - **Asleep or off**: the icon is dimmed and shows the last known value (`–` if there is none yet).
 - **No access**: `?` means the device was found but can't be read yet; see [Access](#access).
-- Hover for the name and details. On Linux, **click** an icon for the settings window and
-  **right-click** for the menu: every device with its level, *Settings…*, *Refresh now*, *Set up
-  access…* (only when needed), *Start on login* and *Quit*. On Windows a click opens the menu.
+- Hover for the name and details. **Click** an icon for the settings window and **right-click**
+  for the menu: every device with its level, *Settings…*, *Refresh now*, *Set up access…* (Linux,
+  only when needed), *Start on login* and *Quit*.
 
-## Settings window (Linux)
+## Settings window
 
-Click any of the icons (or start `battery-state` again, e.g. from the application menu) to open
-it; click again to close it.
+Click any of the icons (or start `battery-state` again, e.g. from the application menu or the
+Start menu) to open it; click again to close it.
 
 - **Devices shown in the tray**: untick a device to remove its icon (it also stops sending
   low-battery notifications). With every device hidden, the app icon stays so the window remains
@@ -34,9 +33,11 @@ it; click again to close it.
 - **Install** (only when not running the installed copy): installs this copy and switches the
   tray over to it.
 
-The choices are saved in `~/.config/battery-state/settings.json`. The window is drawn by the app
-itself over X11, so it needs X11 or XWayland (present on GNOME, KDE, Cinnamon and sway by
-default); the tray icons work without it.
+The choices are saved in `~/.config/battery-state/settings.json` (Windows:
+`%AppData%\battery-state\settings.json`). The window is drawn by the app itself: on Linux over
+X11, so it needs X11 or XWayland (present on GNOME, KDE, Cinnamon and sway by default; the tray
+icons work without it), on Windows as a plain Win32 window that follows the light/dark app
+mode.
 
 Levels are read every 60 seconds (`--interval`), and within a few seconds after a device or
 receiver is plugged in.
@@ -122,8 +123,8 @@ sudo udevadm trigger --subsystem-match=hidraw --action=change
 
 ```
 battery-state              start the tray (default); if it already runs, open its settings window
-battery-state --settings   Linux: start the tray with the settings window open
-battery-state --update     Linux: install the latest release if it is newer
+battery-state --settings   start the tray with the settings window open
+battery-state --update     install the latest release if it is newer
 battery-state --list       print the devices and their levels (--json for JSON)
 battery-state --dump       list all HID nodes, to help add a new device
 battery-state --setup      Linux: install the udev rule (asks for your password)

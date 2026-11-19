@@ -1,5 +1,5 @@
-// Package update updates the installed copy from the GitHub releases, like
-// bibi-brightness: checking is off until the user turns on "Check for updates"; then the
+// Package update updates the installed copy from the GitHub releases (Linux .tar.gz,
+// Windows .zip), like bibi-brightness: checking is off until the user turns on "Check for updates"; then the
 // installed copy looks up the latest release tag at most once a day. Installing downloads
 // that release, unpacks the binary into a temporary folder, checks its --version and runs
 // it with --install. The caller then restarts into the installed binary.
@@ -7,6 +7,8 @@ package update
 
 import (
 	"archive/tar"
+	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"errors"
 	"fmt"
@@ -26,16 +28,25 @@ import (
 const Repo = "https://github.com/matz0r/wireless-battery-state"
 
 const (
-	binary      = "battery-state"
 	tempPrefix  = "battery-state-update-"
 	maxDownload = 64 << 20 // release archives are a few MB; guards against a broken response
 )
+
+// binary is the program's file name inside the release archive.
+func binary() string {
+	if runtime.GOOS == "windows" {
+		return "battery-state.exe"
+	}
+	return "battery-state"
+}
 
 // Interval is the minimum time between two automatic checks.
 const Interval = 24 * time.Hour
 
 // Supported reports whether releases are built for this machine.
-func Supported() bool { return runtime.GOOS == "linux" && runtime.GOARCH == "amd64" }
+func Supported() bool {
+	return (runtime.GOOS == "linux" || runtime.GOOS == "windows") && runtime.GOARCH == "amd64"
+}
 
 // Due reports whether a check is due, given the Unix time of the last successful one. A last
 // check in the future (clock changed) also counts as due.
@@ -117,9 +128,17 @@ func Newer(a, b string) bool {
 	return false
 }
 
-// AssetURL is the release archive built by .github/workflows/release.yml.
+// AssetURL is the release archive for this OS, as .github/workflows/release.yml names it.
 func AssetURL(version string) string {
-	return fmt.Sprintf("%s/releases/download/v%s/battery-state-v%s-x86_64-linux.tar.gz", Repo, version, version)
+	return assetURL(version, runtime.GOOS)
+}
+
+func assetURL(version, goos string) string {
+	suffix := "x86_64-linux.tar.gz"
+	if goos == "windows" {
+		suffix = "x86_64-windows.zip"
+	}
+	return fmt.Sprintf("%s/releases/download/v%s/battery-state-v%s-%s", Repo, version, version, suffix)
 }
 
 // Install downloads version, checks it and runs it with --install, which replaces the
@@ -145,20 +164,33 @@ func Install(version, agent string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("can't download version %s: HTTP %d", version, resp.StatusCode)
 	}
-	exe := filepath.Join(dir, binary)
-	if err := unpack(io.LimitReader(resp.Body, maxDownload), exe); err != nil {
+	exe := filepath.Join(dir, binary())
+	archive, err := io.ReadAll(io.LimitReader(resp.Body, maxDownload))
+	if err != nil {
+		return fmt.Errorf("download interrupted: %w", err)
+	}
+	if runtime.GOOS == "windows" {
+		err = unpackZip(archive, exe)
+	} else {
+		err = unpack(bytes.NewReader(archive), exe)
+	}
+	if err != nil {
 		return err
 	}
 
 	// Make sure the download is the announced version before it replaces anything.
-	out, err := exec.Command(exe, "--version").Output()
+	cmd := exec.Command(exe, "--version")
+	hideWindow(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("can't start the downloaded program: %w", err)
 	}
-	if got := strings.TrimSpace(string(out)); got != binary+" "+version {
+	if got := strings.TrimSpace(string(out)); got != "battery-state "+version {
 		return fmt.Errorf("the download reports %q instead of version %s", got, version)
 	}
-	if out, err := exec.Command(exe, "--install").CombinedOutput(); err != nil {
+	cmd = exec.Command(exe, "--install")
+	hideWindow(cmd)
+	if out, err := cmd.CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))
 		if i := strings.LastIndex(msg, "\n"); i >= 0 {
 			msg = msg[i+1:]
@@ -166,7 +198,7 @@ func Install(version, agent string) error {
 		if msg == "" {
 			msg = err.Error()
 		}
-		return errors.New(strings.TrimPrefix(msg, binary+": "))
+		return errors.New(strings.TrimPrefix(msg, "battery-state: "))
 	}
 	return nil
 }
@@ -181,12 +213,12 @@ func unpack(r io.Reader, exe string) error {
 	for {
 		h, err := tr.Next()
 		if err == io.EOF {
-			return fmt.Errorf("%s is missing from the download", binary)
+			return fmt.Errorf("%s is missing from the download", binary())
 		}
 		if err != nil {
 			return fmt.Errorf("broken archive: %w", err)
 		}
-		if h.Typeflag != tar.TypeReg || path.Base(h.Name) != binary {
+		if h.Typeflag != tar.TypeReg || path.Base(h.Name) != binary() {
 			continue
 		}
 		f, err := os.OpenFile(exe, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o755)
@@ -199,6 +231,34 @@ func unpack(r io.Reader, exe string) error {
 		}
 		return f.Close()
 	}
+}
+
+// unpackZip extracts the battery-state binary from a .zip into exe.
+func unpackZip(archive []byte, exe string) error {
+	zr, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		return fmt.Errorf("broken archive: %w", err)
+	}
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() || path.Base(f.Name) != binary() {
+			continue
+		}
+		r, err := f.Open()
+		if err != nil {
+			return fmt.Errorf("broken archive: %w", err)
+		}
+		defer r.Close()
+		out, err := os.OpenFile(exe, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o755)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, r); err != nil {
+			out.Close()
+			return fmt.Errorf("broken archive: %w", err)
+		}
+		return out.Close()
+	}
+	return fmt.Errorf("%s is missing from the download", binary())
 }
 
 // RemoveLeftovers removes temporary folders of earlier updates that were cut short.

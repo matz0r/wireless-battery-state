@@ -189,11 +189,12 @@ type winPlatform struct {
 }
 
 type winItem struct {
-	p     *winPlatform
-	id    uint32
-	look  appearance
-	hicon windows.Handle
-	added bool
+	p        *winPlatform
+	id       uint32
+	look     appearance
+	hicon    windows.Handle
+	added    bool
+	activate func() // left click; nil shows the menu
 }
 
 // The window procedure is a single callback for the process, so it finds the platform here.
@@ -303,9 +304,17 @@ func wndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 			}
 		}
 	case msg == wmTrayCallback:
+		// NOTIFYICON_VERSION_4: event in the low word of lparam, icon id in the high word
+		// (only its low 16 bits), the click position in wparam.
+		x, y := int32(int16(wparam&0xFFFF)), int32(int16(wparam>>16&0xFFFF))
 		switch lparam & 0xFFFF {
-		case ninSelect, ninKeySelect, wmContextMenu:
-			x, y := int32(int16(wparam&0xFFFF)), int32(int16(wparam>>16&0xFFFF))
+		case ninSelect, ninKeySelect: // left click, or Enter/Space on a focused icon
+			if f := p.activateFor(uint16(lparam >> 16 & 0xFFFF)); f != nil {
+				go f()
+			} else {
+				p.showMenu(x, y)
+			}
+		case wmContextMenu:
 			p.showMenu(x, y)
 		}
 		return 0
@@ -383,10 +392,21 @@ func (p *winPlatform) stableID(key string) uint32 {
 	h := fnv.New32a()
 	h.Write([]byte(key))
 	id := h.Sum32() & 0x7FFFFFFF
-	for id == 0 || p.items[id] != nil {
+	for id == 0 || p.lowTaken(uint16(id)) {
 		id++
 	}
 	return id
+}
+
+// lowTaken reports whether an icon's id already ends in low: click events only carry the low
+// 16 bits of the id, so those must be unique too.
+func (p *winPlatform) lowTaken(low uint16) bool {
+	for id := range p.items {
+		if uint16(id) == low {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *winPlatform) newItem(key string, look appearance, m *menuState, activate func()) (trayItem, error) {
@@ -395,7 +415,7 @@ func (p *winPlatform) newItem(key string, look appearance, m *menuState, activat
 	p.mu.Unlock()
 	var it *winItem
 	p.do(func() {
-		it = &winItem{p: p, id: p.stableID(key), look: look}
+		it = &winItem{p: p, id: p.stableID(key), look: look, activate: activate}
 		p.items[it.id] = it
 		it.show() // if Explorer isn't up yet (early at login), TaskbarCreated adds it later
 	})
@@ -467,6 +487,16 @@ func (it *winItem) remove() {
 		procDestroyIcon.Call(uintptr(it.hicon))
 		it.hicon = 0
 	}
+}
+
+// activateFor returns the click action of the icon whose id ends in low. Window thread only.
+func (p *winPlatform) activateFor(low uint16) func() {
+	for id, it := range p.items {
+		if uint16(id) == low {
+			return it.activate
+		}
+	}
+	return nil
 }
 
 // showMenu shows the shared menu at x, y and runs the chosen action. Window thread only.

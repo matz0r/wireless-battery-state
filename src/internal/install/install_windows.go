@@ -216,3 +216,8 @@ func createShortcut(lnk, target string) error {
 	}
 	return nil
 }
+
+// hideWindow keeps a child process from opening a console window.
+func hideWindow(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+}

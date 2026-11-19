@@ -42,7 +42,7 @@ jobs:
           # -H windowsgui: no console window when the tray starts.
           GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=$v" -o target/release/battery-state.exe ./src
 
-      # The in-app updater (src/internal/update) downloads exactly the Linux archive name.
+      # The in-app updater (src/internal/update) downloads exactly these archive names.
       - name: Package
         run: |
           linux="battery-state-${GITHUB_REF_NAME}-x86_64-linux"

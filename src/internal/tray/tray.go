@@ -75,6 +75,7 @@ type app struct {
 	refresh  chan struct{}
 	quit     chan struct{}
 	quitOnce sync.Once
+	unlock   func() // releases the single-instance lock (Windows restart)
 }
 
 // Run shows the tray icons and blocks until Quit is chosen. It returns ErrRunning if a tray
@@ -95,6 +96,7 @@ func Run(opts Options) error {
 		refresh:  make(chan struct{}, 1),
 		quit:     make(chan struct{}),
 		settings: config.Load(),
+		unlock:   unlock,
 	}
 	p, err := newPlatform(a.requestQuit)
 	if err != nil {
@@ -281,9 +283,7 @@ func (a *app) rebuildMenu() {
 		items = append(items, menuItem{Label: fmt.Sprintf("%s: %s", d.Name, d.Detail())})
 	}
 	items = append(items, menuItem{Separator: true})
-	if hasSettingsWindow {
-		items = append(items, menuItem{Label: "Settings…", Enabled: true, Action: a.showWindow})
-	}
+	items = append(items, menuItem{Label: "Settings…", Enabled: true, Action: a.showWindow})
 	if v := a.offeredUpdate(); v != "" {
 		items = append(items, menuItem{Label: "Update to " + v, Enabled: true, Action: func() {
 			a.showWindow()

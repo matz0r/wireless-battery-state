@@ -32,8 +32,8 @@ func main() {
 	rules := flag.Bool("udev-rules", false, "Linux: print the udev rule used by --setup, then exit")
 	doInstall := flag.Bool("install", false, "install for the current user ("+installHint+")")
 	doUninstall := flag.Bool("uninstall", false, "remove the per-user installation and autostart entry")
-	settings := flag.Bool("settings", false, "Linux: open the settings window (of the running tray, or start the tray with it)")
-	doUpdate := flag.Bool("update", false, "Linux: install the latest release if it is newer than this program")
+	settings := flag.Bool("settings", false, "open the settings window (of the running tray, or start the tray with it)")
+	doUpdate := flag.Bool("update", false, "install the latest release if it is newer than this program")
 	interval := flag.Duration("interval", 60*time.Second, "how often to read the battery levels")
 	showVersion := flag.Bool("version", false, "print the version, then exit")
 	flag.Parse()
@@ -77,7 +77,7 @@ func main() {
 		fmt.Println("Installed to", path)
 	case *doUpdate:
 		if !update.Supported() {
-			exitOn(fmt.Errorf("--update is only available on Linux x86_64 for now"))
+			exitOn(fmt.Errorf("no releases are built for this system"))
 		}
 		v, err := update.Latest("battery-state/" + version)
 		exitOn(err)

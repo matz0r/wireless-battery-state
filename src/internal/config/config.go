@@ -1,5 +1,5 @@
-// Package config loads and saves the user's settings in
-// $XDG_CONFIG_HOME/battery-state/settings.json.
+// Package config loads and saves the user's settings in battery-state/settings.json under
+// the user's config directory.
 package config
 
 import (
@@ -21,10 +21,10 @@ type Settings struct {
 	UpdateLatest string `json:"update_latest,omitempty"`
 }
 
-// Path is the settings file.
+// Path is the settings file: $XDG_CONFIG_HOME (~/.config) on Linux, %AppData% on Windows.
 func Path() string {
-	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
+	dir, err := os.UserConfigDir()
+	if err != nil {
 		home, _ := os.UserHomeDir()
 		dir = filepath.Join(home, ".config")
 	}

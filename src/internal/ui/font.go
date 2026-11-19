@@ -1,12 +1,9 @@
 package ui
 
 import (
-	"context"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
-	"time"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gobold"
@@ -15,7 +12,8 @@ import (
 	"golang.org/x/image/font/sfnt"
 )
 
-// The desktop's sans-serif font (through fc-match) if it can be read, the Go fonts otherwise.
+// The desktop's UI font (fc-match's sans-serif on Linux, Segoe UI on Windows) if it can be
+// read, the Go fonts otherwise.
 
 var (
 	fontsOnce     sync.Once
@@ -30,22 +28,20 @@ type faceKey struct {
 }
 
 func loadFonts() {
-	regular = systemFont("sans-serif")
-	bold = systemFont("sans-serif:bold")
+	regular = systemFont(false)
+	bold = systemFont(true)
 	if regular == nil || bold == nil {
 		regular, _ = opentype.Parse(goregular.TTF)
 		bold, _ = opentype.Parse(gobold.TTF)
 	}
 }
 
-func systemFont(pattern string) *sfnt.Font {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "fc-match", "-f", "%{file}", pattern).Output()
-	if err != nil {
+// systemFont loads the desktop's regular or bold UI font, nil if there is none.
+func systemFont(isBold bool) *sfnt.Font {
+	path := systemFontPath(isBold)
+	if path == "" {
 		return nil
 	}
-	path := strings.TrimSpace(string(out))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
