@@ -1,12 +1,18 @@
-// Package icon draws the tray icons: the battery percentage as a number with a level bar.
+// Package icon draws the tray icons: a device pictogram, the battery percentage and a level bar.
 package icon
 
 import (
+	"bytes"
 	"image"
 	"image/color"
 	"image/draw"
+	"image/png"
+	"math"
 	"strconv"
 	"sync"
+
+	"github.com/matz0r/wireless-battery-state/assets"
+	xdraw "golang.org/x/image/draw"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gobold"
@@ -21,6 +27,7 @@ type State struct {
 	Asleep   bool // dimmed (last known value)
 	NoAccess bool // "?"
 	Low      int  // red at or below this level
+	Glyph    Glyph
 }
 
 // Sizes are the pixmap sizes handed to the tray; it picks the best fit.
@@ -77,12 +84,18 @@ func Text(s State) string {
 	}
 }
 
-// Render draws a size×size icon.
+// Render draws a size×size icon: the device pictogram on top (if any), the number below it
+// and the level bar along the bottom.
 func Render(s State, size int) *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, size, size))
+	pad := 1 // outline width
+	if size < 20 {
+		pad = 0
+	}
 
-	// Level bar along the bottom.
-	barH := max(size/6, 2)
+	// The layout is the same for every icon of a size, with or without pictogram, so the
+	// numbers of all devices line up and have the same font size.
+	barH := max(size/9, 2)
 	barTop := size - barH
 	if s.Percent >= 0 && !s.NoAccess {
 		draw.Draw(img, image.Rect(0, barTop, size, size), image.NewUniform(barBack), image.Point{}, draw.Src)
@@ -99,23 +112,34 @@ func Render(s State, size int) *image.NRGBA {
 		if s.Percent > 0 {
 			w = max(w, 1)
 		}
-		draw.Draw(img, image.Rect(1, barTop+1, 1+w, size-1), image.NewUniform(fill), image.Point{}, draw.Src)
+		inset := 1
+		if barH <= 2 {
+			inset = 0
+		}
+		draw.Draw(img, image.Rect(1, barTop+inset, 1+w, size-inset), image.NewUniform(fill), image.Point{}, draw.Src)
 	}
 
-	// Number, as large as fits above the bar.
+	gh := int(math.Round(float64(size) * 0.36))
+	if s.Glyph != NoGlyph {
+		h := gh - pad
+		w := min(int(math.Round(float64(h)*s.Glyph.aspect())), size-2*pad)
+		mask := glyphMask(s.Glyph, w, h)
+		at := image.Pt((size-w)/2, pad+(h-mask.Bounds().Dy())/2)
+		drawMask(img, mask, at, textColor, pad)
+	}
+	textTop := gh + max(size/16, 1)
+
+	// Number: one font size per icon size, the largest at which "100" fits.
 	text := Text(s)
 	col := textColor
 	if s.Percent >= 0 && s.Percent <= s.Low && !s.Charging && !s.NoAccess {
 		col = lowColor
 	}
-	avail := barTop - 1
-	f, cx, cy := fit(text, float64(size), float64(avail))
-	x := fixed.I(size)/2 - cx
-	y := fixed.I(avail)/2 - cy
-	pad := 1
-	if size < 20 {
-		pad = 0
-	}
+	avail := barTop - 1 - textTop
+	f, _, cy := fit("100", float64(size-2*pad), float64(avail-pad))
+	b, _ := font.BoundString(f, text)
+	x := fixed.I(size)/2 - (b.Min.X+b.Max.X)/2
+	y := fixed.I(textTop) + fixed.I(avail)/2 - cy // same baseline for every text
 	drawText(img, f, text, x, y, col, pad)
 
 	if s.Asleep {
@@ -124,6 +148,19 @@ func Render(s State, size int) *image.NRGBA {
 		}
 	}
 	return img
+}
+
+// drawMask paints col through mask at offset, with a dark outline like the text.
+func drawMask(img *image.NRGBA, mask *image.Alpha, at image.Point, col color.NRGBA, pad int) {
+	r := mask.Bounds().Add(at)
+	for dx := -pad; dx <= pad; dx++ {
+		for dy := -pad; dy <= pad; dy++ {
+			if dx != 0 || dy != 0 {
+				draw.DrawMask(img, r.Add(image.Pt(dx, dy)), image.NewUniform(outline), image.Point{}, mask, image.Point{}, draw.Over)
+			}
+		}
+	}
+	draw.DrawMask(img, r, image.NewUniform(col), image.Point{}, mask, image.Point{}, draw.Over)
 }
 
 // fit picks the largest font size whose text is at most maxW wide and capH tall. It returns
@@ -159,18 +196,14 @@ func drawText(img *image.NRGBA, f font.Face, text string, x, y fixed.Int26_6, co
 	d.DrawString(text)
 }
 
-// AppIcon draws the application icon (a battery) for the desktop entry.
+// AppIcon returns the logo (assets/icon-512.png) scaled to size×size.
 func AppIcon(size int) *image.NRGBA {
-	img := image.NewNRGBA(image.Rect(0, 0, size, size))
-	u := float64(size) / 64
-	rect := func(x0, y0, x1, y1 float64, c color.NRGBA) {
-		draw.Draw(img, image.Rect(int(x0*u), int(y0*u), int(x1*u), int(y1*u)), image.NewUniform(c), image.Point{}, draw.Over)
+	src, err := png.Decode(bytes.NewReader(assets.Icon512))
+	if err != nil {
+		panic(err) // embedded at build time; can't fail
 	}
-	body := color.NRGBA{0x2B, 0x2F, 0x36, 0xFF}
-	rect(6, 18, 54, 46, color.NRGBA{0xE6, 0xE6, 0xE6, 0xFF}) // shell
-	rect(54, 26, 60, 38, color.NRGBA{0xE6, 0xE6, 0xE6, 0xFF})
-	rect(10, 22, 50, 42, body)
-	rect(12, 24, 40, 40, barGood) // charge
+	img := image.NewNRGBA(image.Rect(0, 0, size, size))
+	xdraw.CatmullRom.Scale(img, img.Bounds(), src, src.Bounds(), xdraw.Src, nil)
 	return img
 }
 

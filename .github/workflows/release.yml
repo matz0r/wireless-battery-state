@@ -22,15 +22,15 @@ jobs:
         run: go test ./...
 
       - name: Build
-        env:
-          CGO_ENABLED: "0"
-        run: go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o battery-state ./src
+        run: make release VERSION="${GITHUB_REF_NAME#v}"
 
+      # The in-app updater (src/internal/update) downloads exactly this archive name.
       - name: Package
         run: |
           name="battery-state-${GITHUB_REF_NAME}-x86_64-linux"
           mkdir -p "$name"
-          cp battery-state README.md LICENSE "$name/"
+          cp target/release/battery-state README.md LICENSE "$name/"
+          cp assets/icon.svg "$name/battery-state.svg"
           tar -czf "$name.tar.gz" "$name"
           echo "ARCHIVE=$name.tar.gz" >> "$GITHUB_ENV"
 

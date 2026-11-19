@@ -9,6 +9,10 @@ func TestRenderSizes(t *testing.T) {
 		{Percent: 50, Charging: true, Low: 15},
 		{Percent: -1, Asleep: true},
 		{Percent: -1, NoAccess: true},
+		{Percent: 88, Low: 15, Glyph: MouseGlyph},
+		{Percent: 100, Low: 15, Glyph: KeyboardGlyph},
+		{Percent: 3, Charging: true, Low: 15, Glyph: HeadsetGlyph},
+		{Percent: -1, NoAccess: true, Glyph: MouseGlyph},
 	}
 	for _, s := range states {
 		for _, size := range Sizes {
@@ -35,5 +39,30 @@ func TestRenderSizes(t *testing.T) {
 func TestText(t *testing.T) {
 	if Text(State{Percent: 42}) != "42" || Text(State{Percent: -1}) != "–" || Text(State{NoAccess: true}) != "?" {
 		t.Fatal("unexpected labels")
+	}
+}
+
+func TestGlyphsHaveInk(t *testing.T) {
+	for _, g := range []Glyph{MouseGlyph, KeyboardGlyph, HeadsetGlyph} {
+		for _, h := range []int{7, 8, 17} {
+			w := int(float64(h) * g.aspect())
+			m := glyphMask(g, w, h)
+			ink := 0
+			for _, a := range m.Pix {
+				if a > 128 {
+					ink++
+				}
+			}
+			if ink < w*h/5 {
+				t.Errorf("glyph %d at %dx%d: only %d inked pixels", g, w, h, ink)
+			}
+		}
+	}
+}
+
+func TestAppIcon(t *testing.T) {
+	img := AppIcon(48)
+	if img.Bounds().Dx() != 48 || img.NRGBAAt(24, 24).A == 0 {
+		t.Fatal("logo not decoded/scaled")
 	}
 }

@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -14,9 +15,10 @@ import (
 	"github.com/matz0r/wireless-battery-state/src/internal/install"
 	"github.com/matz0r/wireless-battery-state/src/internal/setup"
 	"github.com/matz0r/wireless-battery-state/src/internal/tray"
+	"github.com/matz0r/wireless-battery-state/src/internal/update"
 )
 
-var version = "0.1.0"
+var version = "0.3.0"
 
 func main() {
 	list := flag.Bool("list", false, "print the devices and their battery levels, then exit")
@@ -26,6 +28,8 @@ func main() {
 	rules := flag.Bool("udev-rules", false, "print the udev rule used by --setup, then exit")
 	doInstall := flag.Bool("install", false, "install for the current user (~/.local/bin, application menu)")
 	doUninstall := flag.Bool("uninstall", false, "remove the per-user installation and autostart entry")
+	settings := flag.Bool("settings", false, "open the settings window (of the running tray, or start the tray with it)")
+	doUpdate := flag.Bool("update", false, "install the latest release if it is newer than this program")
 	interval := flag.Duration("interval", 60*time.Second, "how often to read the battery levels")
 	showVersion := flag.Bool("version", false, "print the version, then exit")
 	flag.Parse()
@@ -67,11 +71,27 @@ func main() {
 		path, err := install.Install()
 		exitOn(err)
 		fmt.Println("Installed to", path)
+	case *doUpdate:
+		v, err := update.Latest("battery-state/" + version)
+		exitOn(err)
+		if !update.Newer(v, version) {
+			fmt.Println("Up to date:", version)
+			return
+		}
+		exitOn(update.Install(v, "battery-state/"+version))
+		fmt.Println("Updated to", v, "- restart the tray to use it.")
 	case *doUninstall:
 		exitOn(install.Uninstall())
 		fmt.Println("Uninstalled.")
 	default:
-		exitOn(tray.Run(tray.Options{Interval: *interval, Version: version}))
+		err := tray.Run(tray.Options{Interval: *interval, Version: version, OpenSettings: *settings})
+		if errors.Is(err, tray.ErrRunning) {
+			// Started again, e.g. from the application menu: open the running tray's window.
+			if tray.ShowRunning() == nil {
+				return
+			}
+		}
+		exitOn(err)
 	}
 }
 

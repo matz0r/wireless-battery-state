@@ -43,6 +43,8 @@ type item struct {
 	menu  *menuObject
 	mu    sync.Mutex
 	done  chan struct{}
+	// activate runs on a left click (the host shows the menu on a right click).
+	activate func()
 }
 
 var itemSeq struct {
@@ -50,8 +52,9 @@ var itemSeq struct {
 	n int
 }
 
-// newItem connects to the session bus and registers a tray icon.
-func newItem(id, title string, icons []pixmap, tip tooltip, m *menuState) (*item, error) {
+// newItem connects to the session bus and registers a tray icon. activate runs when the
+// icon is clicked.
+func newItem(id, title string, icons []pixmap, tip tooltip, m *menuState, activate func()) (*item, error) {
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		return nil, fmt.Errorf("session bus: %w", err)
@@ -61,7 +64,7 @@ func newItem(id, title string, icons []pixmap, tip tooltip, m *menuState) (*item
 	name := fmt.Sprintf("org.kde.StatusNotifierItem-%d-%d", os.Getpid(), itemSeq.n)
 	itemSeq.Unlock()
 
-	it := &item{conn: conn, name: name, done: make(chan struct{})}
+	it := &item{conn: conn, name: name, done: make(chan struct{}), activate: activate}
 	if err := conn.Export(sniMethods{it}, sniPath, sniIface); err != nil {
 		conn.Close()
 		return nil, err
@@ -75,7 +78,7 @@ func newItem(id, title string, icons []pixmap, tip tooltip, m *menuState) (*item
 		"IconName":   {Value: "", Emit: prop.EmitFalse},
 		"IconPixmap": {Value: icons, Emit: prop.EmitFalse},
 		"ToolTip":    {Value: tip, Emit: prop.EmitFalse},
-		"ItemIsMenu": {Value: true, Emit: prop.EmitFalse},
+		"ItemIsMenu": {Value: false, Emit: prop.EmitFalse},
 		"Menu":       {Value: menuPath, Emit: prop.EmitFalse},
 	}})
 	if err != nil {
@@ -170,11 +173,17 @@ func (it *item) close() {
 	it.conn.Close() // dropping the name removes the icon from the tray
 }
 
-// sniMethods are the methods hosts call. With ItemIsMenu the host opens the menu itself on a
-// click, so these only need to exist.
+// sniMethods are the methods hosts call. ItemIsMenu is false, so a left click calls Activate
+// (the settings window) and a right click opens the menu.
 type sniMethods struct{ it *item }
 
-func (sniMethods) Activate(x, y int32) *dbus.Error          { return nil }
+func (m sniMethods) Activate(x, y int32) *dbus.Error {
+	if m.it != nil && m.it.activate != nil {
+		go m.it.activate()
+	}
+	return nil
+}
+
 func (sniMethods) SecondaryActivate(x, y int32) *dbus.Error { return nil }
 func (sniMethods) ContextMenu(x, y int32) *dbus.Error       { return nil }
 func (sniMethods) Scroll(delta int32, orientation string) *dbus.Error {

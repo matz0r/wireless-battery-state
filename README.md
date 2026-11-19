@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon-256.png" alt="Battery State" height="128px"></p>
+
 # Battery State
 
 Battery levels of your wireless mouse, keyboard and headset in the Linux system tray.
@@ -8,13 +10,34 @@ Inspired by and protocol-compatible with
 
 ## Display
 
-- **One tray icon per device**, showing the percentage with a level bar underneath.
+- **One tray icon per device**: a small pictogram (mouse, keyboard or headset) on top, the
+  percentage below it and a level bar along the bottom.
 - **Low battery**: the number turns red at 15% or less, and a desktop notification appears once.
 - **Charging**: the bar turns blue.
 - **Asleep or off**: the icon is dimmed and shows the last known value (`–` if there is none yet).
 - **No access**: `?` means the device was found but can't be read yet; see [Access](#access).
-- Hover for the name and details. Click for the menu: every device with its level, *Refresh now*,
-  *Set up access…* (only when needed), *Start on login* and *Quit*.
+- Hover for the name and details. **Click** an icon for the settings window, **right-click** for
+  the menu: every device with its level, *Settings…*, *Refresh now*, *Set up access…* (only when
+  needed), *Start on login* and *Quit*.
+
+## Settings window
+
+Click any of the icons (or start `battery-state` again, e.g. from the application menu) to open
+it; click again to close it.
+
+- **Devices shown in the tray**: untick a device to remove its icon (it also stops sending
+  low-battery notifications). With every device hidden, the app icon stays so the window remains
+  reachable.
+- **Start on login**.
+- **Check for updates** (only in the installed copy, off by default): looks for a new release on
+  GitHub once a day and offers *Update to X.Y.Z*, which downloads, checks and installs it and
+  restarts the tray.
+- **Install** (only when not running the installed copy): installs this copy and switches the
+  tray over to it.
+
+The choices are saved in `~/.config/battery-state/settings.json`. The window is drawn by the app
+itself over X11, so it needs X11 or XWayland (present on GNOME, KDE, Cinnamon and sway by
+default); the tray icons work without it.
 
 Levels are read every 60 seconds (`--interval`), and within a few seconds after a device or
 receiver is plugged in.
@@ -41,7 +64,8 @@ MATE, LXQt, Budgie, Waybar, and GNOME with the AppIndicator extension.
 Needs Go 1.27 or newer to build. A prebuilt binary works too: `battery-state --install` copies
 itself to `~/.local/bin/battery-state`. No root is needed for installing.
 
-Turn on *Start on login* in the tray menu to have it start with your session.
+Or click a tray icon and press **Install** in the settings window. Turn on *Start on login* there
+(or in the tray menu) to have it start with your session.
 
 ## Access
 
@@ -65,7 +89,9 @@ sudo udevadm trigger --subsystem-match=hidraw --action=change
 ## Command line
 
 ```
-battery-state              start the tray (default)
+battery-state              start the tray (default); if it already runs, open its settings window
+battery-state --settings   start the tray with the settings window open
+battery-state --update     install the latest release if it is newer
 battery-state --list       print the devices and their levels (--json for JSON)
 battery-state --dump       list all hidraw nodes, to help add a new device
 battery-state --setup      install the udev rule (asks for your password)
@@ -77,8 +103,11 @@ battery-state --interval 30s
 ## Build and test
 
 ```bash
-go build -o battery-state ./src
-go test ./...
+make            # development build: target/debug/battery-state
+make release    # static, stripped build: target/release/battery-state
+make test       # go test ./...
+make run ARGS=--list
+make icon       # regenerate the logo in assets/ (needs Pillow)
 ```
 
 Releases: push a tag `vX.Y.Z`; `.github/workflows/release.yml` builds a static binary and

@@ -4,13 +4,17 @@ package install
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image/png"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/matz0r/wireless-battery-state/assets"
 	"github.com/matz0r/wireless-battery-state/src/internal/icon"
 )
 
@@ -45,10 +49,27 @@ func desktopPath() string { return filepath.Join(dataHome(), "applications", app
 
 func autostartPath() string { return filepath.Join(configHome(), "autostart", appID+".desktop") }
 
-var iconSizes = []int{32, 48, 64, 128, 256}
+// Logo sizes written into the hicolor theme; 256 and 512 are the generated PNGs as is.
+var iconSizes = []int{32, 48, 64, 128, 256, 512}
 
 func iconPath(size int) string {
 	return filepath.Join(dataHome(), "icons", "hicolor", fmt.Sprintf("%dx%d", size, size), "apps", appID+".png")
+}
+
+func svgIconPath() string {
+	return filepath.Join(dataHome(), "icons", "hicolor", "scalable", "apps", appID+".svg")
+}
+
+func iconPNG(size int) ([]byte, error) {
+	switch size {
+	case 256:
+		return assets.Icon256, nil
+	case 512:
+		return assets.Icon512, nil
+	}
+	var buf bytes.Buffer
+	err := png.Encode(&buf, icon.AppIcon(size))
+	return buf.Bytes(), err
 }
 
 func desktopEntry(exec string, autostart bool) string {
@@ -90,13 +111,16 @@ func Install() (string, error) {
 		}
 	}
 	for _, s := range iconSizes {
-		var buf bytes.Buffer
-		if err := png.Encode(&buf, icon.AppIcon(s)); err != nil {
+		data, err := iconPNG(s)
+		if err != nil {
 			return "", err
 		}
-		if err := writeFile(iconPath(s), buf.Bytes(), 0o644); err != nil {
+		if err := writeFile(iconPath(s), data, 0o644); err != nil {
 			return "", err
 		}
+	}
+	if err := writeFile(svgIconPath(), assets.IconSVG, 0o644); err != nil {
+		return "", err
 	}
 	if err := writeFile(desktopPath(), []byte(desktopEntry(dst, false)), 0o644); err != nil {
 		return "", err
@@ -112,7 +136,7 @@ func Install() (string, error) {
 
 // Uninstall removes what Install and SetAutostart created.
 func Uninstall() error {
-	paths := []string{BinPath(), desktopPath(), autostartPath()}
+	paths := []string{BinPath(), desktopPath(), autostartPath(), svgIconPath()}
 	for _, s := range iconSizes {
 		paths = append(paths, iconPath(s))
 	}
@@ -185,4 +209,54 @@ func copyFile(src, dst string, mode os.FileMode) error {
 		return err
 	}
 	return os.Rename(tmp, dst)
+}
+
+// State describes the installed copy relative to the running binary.
+type State struct {
+	Installed bool   // ~/.local/bin/battery-state exists
+	Running   bool   // the running binary is the installed copy
+	Same      bool   // the installed copy has the same contents as the running binary
+	Version   string // the installed copy's --version, "" if unknown
+}
+
+// Running reports whether the running binary is the installed copy.
+func Running() bool {
+	self, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	self, _ = filepath.EvalSymlinks(self)
+	dst, err := filepath.EvalSymlinks(BinPath())
+	return err == nil && self == dst
+}
+
+// Current looks at the installed copy. It runs it with --version, so call it once in a
+// while (when the settings window opens), not on every redraw.
+func Current() State {
+	var s State
+	if _, err := os.Stat(BinPath()); err != nil {
+		return s
+	}
+	s.Installed = true
+	s.Running = Running()
+	if s.Running {
+		s.Same = true
+	} else if self, err := os.Executable(); err == nil {
+		s.Same = sameFile(self, BinPath())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, BinPath(), "--version").Output(); err == nil {
+		s.Version = strings.TrimPrefix(strings.TrimSpace(string(out)), binName+" ")
+	}
+	return s
+}
+
+func sameFile(a, b string) bool {
+	da, err := os.ReadFile(a)
+	if err != nil {
+		return false
+	}
+	db, err := os.ReadFile(b)
+	return err == nil && bytes.Equal(da, db)
 }

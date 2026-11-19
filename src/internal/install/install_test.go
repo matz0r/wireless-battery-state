@@ -22,7 +22,7 @@ func TestInstallAutostartUninstall(t *testing.T) {
 	if dst != BinPath() {
 		t.Fatalf("installed to %s", dst)
 	}
-	for _, p := range []string{BinPath(), desktopPath(), iconPath(64)} {
+	for _, p := range []string{BinPath(), desktopPath(), iconPath(64), iconPath(512), svgIconPath()} {
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("missing %s", p)
 		}
