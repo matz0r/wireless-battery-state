@@ -256,11 +256,10 @@ func (a *app) saveSettings() {
 func (a *app) setHidden(key string, hidden bool) {
 	a.mu.Lock()
 	a.settings.SetHidden(key, hidden)
-	devs := append([]battery.Status(nil), a.devices...)
 	a.mu.Unlock()
 	a.saveSettings()
 	go func() {
-		if err := a.apply(devs); err != nil {
+		if err := a.reapply(); err != nil {
 			fmt.Fprintln(os.Stderr, "battery-state:", err)
 		}
 	}()

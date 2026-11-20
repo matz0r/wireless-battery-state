@@ -64,6 +64,7 @@ type app struct {
 	menu     *menuState
 	monitor  *battery.Monitor
 
+	applyMu  sync.Mutex // serializes apply/reapply, so a stale device list can't win
 	mu       sync.Mutex
 	items    map[string]trayItem
 	devices  []battery.Status // all devices, hidden ones included
@@ -183,8 +184,25 @@ func (a *app) visible(devs []battery.Status) []battery.Status {
 // devices get no icon; with no icon left the app icon stands in, so the settings stay
 // reachable.
 func (a *app) apply(all []battery.Status) error {
+	a.applyMu.Lock()
+	defer a.applyMu.Unlock()
 	a.mu.Lock()
 	a.devices = all
+	a.mu.Unlock()
+	return a.syncIcons()
+}
+
+// reapply redoes apply with the current devices, e.g. after a device was hidden or shown.
+func (a *app) reapply() error {
+	a.applyMu.Lock()
+	defer a.applyMu.Unlock()
+	return a.syncIcons()
+}
+
+// syncIcons does the work of apply. The caller holds applyMu.
+func (a *app) syncIcons() error {
+	a.mu.Lock()
+	all := append([]battery.Status(nil), a.devices...)
 	a.mu.Unlock()
 	a.rebuildMenu()
 	a.refreshWindow()
