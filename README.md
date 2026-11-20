@@ -4,7 +4,11 @@
 
 Battery levels of your wireless mouse, keyboard and headset in the system tray. Cross-platform (Linux and Windows) in a single static binary written in Go, with no vendor software, daemon or runtime needed. Inspired by [Wireless Battery](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor).
 
-<p align="center"><img src="assets/taskbar.png" alt="Battery State" height="75px"></p>
+<p align="center">
+  <img src="assets/taskbar.png" alt="Battery State icons in the taskbar" height="75px" align="middle">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="assets/settings.png" alt="Battery State settings window" height="200px" align="middle">
+</p>
 
 ## Display
 
